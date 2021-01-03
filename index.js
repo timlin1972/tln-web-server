@@ -56,40 +56,46 @@ class WebServer {
     this.cert = configs.cert || DEF_CERT;
 
     this.httpServer = null;
+    this.httpsServer = null;
 
     if (this.forceHttps)  this.app.use(httpsRedirect(this.httpsPort));
     if (this.publicDir)   this.app.use(express.static(this.publicDir));
+
+    this.app.use((_, res) => res.redirect('/'));
 
     this.log('info', 'Initialized');
   }
 
   start = () => new Promise((resolve) => {
-      this.httpServer = this.app.listen(this.httpPort, () => {
+    const setHttpsServer = () => {
+      const { app, key, cert, httpsPort } = this;
+      
+      this.httpsServer = https.createServer({ key, cert }, app).listen(httpsPort, () => {
+        const msgListeningI18n = this.i18n ? this.i18n.t(STR_HTTPS_LISTEN) : STR_HTTPS_LISTEN;
+        this.log('info', `${msgListeningI18n} ${this.httpsPort}`);
 
-        const msgListeningI18n = this.i18n ? this.i18n.t(STR_HTTP_LISTEN) : STR_HTTP_LISTEN;
-        this.log('info', `${msgListeningI18n} ${this.httpPort}`);
-
-        const { app, key, cert, httpsPort } = this;
-        
-        https.createServer({ key, cert }, app).listen(httpsPort, () => {
-
-          const msgListeningI18n = this.i18n ? this.i18n.t(STR_HTTPS_LISTEN) : STR_HTTPS_LISTEN;
-          this.log('info', `${msgListeningI18n} ${this.httpsPort}`);
-
-          resolve(null);
-          return;  
-        });
+        return resolve(null);
       });
+    };
+
+    this.httpServer = this.app.listen(this.httpPort, () => {
+      const msgListeningI18n = this.i18n ? this.i18n.t(STR_HTTP_LISTEN) : STR_HTTP_LISTEN;
+      this.log('info', `${msgListeningI18n} ${this.httpPort}`);
+
+      return setHttpsServer();
     });
+  });
 
   stop = () => new Promise((resolve) => {
-      this.httpServer.close(() => {
-        this.log('warn', 'http server is closed');
-        resolve(null);
-      })
-    });
+    this.httpServer.close(() => {
+      this.log('warn', 'http server is closed');
+      resolve(null);
+    })
+  });
 
   getApp = () => this.app;
+  getHttpServer = () => this.httpServer;
+  getHttpsServer = () => this.httpsServer;
 
   log = (level=DEF_LEVEL, msg) => {
     const msgI18n = this.i18n ? this.i18n.t(msg) : msg;
