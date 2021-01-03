@@ -1,44 +1,84 @@
 const express = require('express');
+const https = require('https');
+const url = require('url');
+const fs = require('fs');
+const path = require('path');
 
 const MODULE_NAME = 'web-server';
 
-const DEF_PORT = 3000;
+const STR_HTTP_LISTEN = 'http server is listening at port';
+const STR_HTTPS_LISTEN = 'https server is listening at port';
+
+const DEF_HTTP_PORT = 3000;
+const DEF_HTTPS_PORT = 3001;
+const DEF_FORCE_HTTPS = true;
 const DEF_LEVEL = 'info';
 const DEF_LOGGER = null;
 const DEF_PUBLIC_DIR = null;
 const DEF_I18N = null;
+const DEF_KEY = fs.readFileSync(path.join(__dirname, '..', 'lib/credentials/key.pem'), 'utf8');
+const DEF_CERT = fs.readFileSync(path.join(__dirname, '..', 'lib/credentials/cert.pem'), 'utf8');
 
 const DEF_CONFIGS = {
   logger: DEF_LOGGER,
-  port: DEF_PORT,
+  httpPort: DEF_HTTP_PORT,
+  httpsPort: DEF_HTTPS_PORT,
+  forceHttps: DEF_FORCE_HTTPS,
   publicDir: DEF_PUBLIC_DIR,
   i18n: DEF_I18N,
+  key: DEF_KEY,
+  cert: DEF_CERT,
 }
+
+const httpsRedirect = (httpsPort) => (
+  (req, res, next) => {
+    if (!req.secure) {
+      const incomingUrl = `http://${req.headers.host}${req.url}`;
+      const incomingHostname = url.parse(incomingUrl).hostname;
+      const httpsUrl = `https://${incomingHostname}:${httpsPort}${req.url}`;
+      res.redirect(httpsUrl);
+    } else {
+      next();
+    }
+  }
+);
 
 class WebServer {
   constructor(configs=DEF_CONFIGS) {
     this.app = express();
-    this.port = configs.port || DEF_PORT;
+    this.httpPort = configs.httpPort || DEF_HTTP_PORT;
+    this.httpsPort = configs.httpsPort || DEF_HTTPS_PORT;
+    this.forceHttps = configs.forceHttps || DEF_FORCE_HTTPS;
     this.logger = configs.logger || DEF_LOGGER;
     this.publicDir = configs.publicDir || DEF_PUBLIC_DIR;
     this.i18n = configs.i18n || DEF_I18N;
+    this.key = configs.key || DEF_KEY;
+    this.cert = configs.cert || DEF_CERT;
 
     this.httpServer = null;
 
-    if (this.publicDir)  this.app.use(express.static(this.publicDir));
+    if (this.forceHttps)  this.app.use(httpsRedirect(this.httpsPort));
+    if (this.publicDir)   this.app.use(express.static(this.publicDir));
 
     this.log('info', 'Initialized');
   }
 
   start = () => new Promise((resolve) => {
-      this.httpServer = this.app.listen(this.port, () => {
-        const msgListeningI18n = this.i18n 
-            ? this.i18n.t('http server is listening at port') 
-            : 'http server is listening at port';
+      this.httpServer = this.app.listen(this.httpPort, () => {
 
-        this.log('info', `${msgListeningI18n} ${this.port}`);
-        resolve(null);
-        return;
+        const msgListeningI18n = this.i18n ? this.i18n.t(STR_HTTP_LISTEN) : STR_HTTP_LISTEN;
+        this.log('info', `${msgListeningI18n} ${this.httpPort}`);
+
+        const { app, key, cert, httpsPort } = this;
+        
+        https.createServer({ key, cert }, app).listen(httpsPort, () => {
+
+          const msgListeningI18n = this.i18n ? this.i18n.t(STR_HTTPS_LISTEN) : STR_HTTPS_LISTEN;
+          this.log('info', `${msgListeningI18n} ${this.httpsPort}`);
+
+          resolve(null);
+          return;  
+        });
       });
     });
 
@@ -60,7 +100,9 @@ class WebServer {
 
   toString = () => `[${MODULE_NAME}]\n\
     \tlogger: ${this.logger ? 'yes' : 'no'}\n\
-    \tport: ${this.port}\n\
+    \thttpPort: ${this.httpPort}\n\
+    \thttpsPort: ${this.httpsPort}\n\
+    \tforceHttps: ${this.forceHttps}\n\
     \tpublicDir: ${this.publicDir}\n\
     `;  
 }
